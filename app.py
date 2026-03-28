@@ -65,7 +65,6 @@ role = st.sidebar.radio("請選擇您的角色介面：", [
 
 st.sidebar.divider()
 st.sidebar.caption("即時同步設定：")
-# 依據不同角色，預設決定要不要自動更新（看板預設開啟，其他預設關閉以免干擾輸入）
 default_refresh = True if role == "🖥️ 急診動態看板 (觀察系統)" else False
 auto_refresh = st.sidebar.checkbox("🔄 開啟自動更新 (10秒刷新)", value=default_refresh)
 
@@ -79,6 +78,38 @@ if role == "👩‍⚕️ 護理人員派發端":
     st.title("👩‍⚕️ 護佐任務派發")
     
     online_list = db_data.get("online_nas", [])
+    
+    # 🌟 新增：強制護佐上下線管理區塊
+    with st.expander("⚙️ 護佐上下線管理 (防呆機制)"):
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown("##### 🔴 強制下線 (點擊移除)")
+            if not online_list:
+                st.write("目前無人上線")
+            else:
+                for na in online_list:
+                    if st.button(f"將「{na}」強制下線", key=f"offline_{na}"):
+                        current_db = load_data()
+                        if na in current_db.get("online_nas", []):
+                            current_db["online_nas"].remove(na)
+                            save_data(current_db)
+                        st.rerun()
+        with col_b:
+            st.markdown("##### 🟢 強制上線 (手動新增)")
+            force_na_name = st.text_input("輸入護佐綽號：", key="force_on_input")
+            if st.button("強制上線"):
+                if force_na_name:
+                    current_db = load_data()
+                    if force_na_name not in current_db.get("online_nas", []):
+                        current_db.setdefault("online_nas", []).append(force_na_name)
+                        save_data(current_db)
+                    st.success(f"已將 {force_na_name} 強制上線！")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.warning("請先輸入綽號")
+
+    # 顯示目前線上名單
     st.info(f"🟢 目前線上護佐：{', '.join(online_list) if online_list else '目前無人上線'}")
     
     with st.container(border=True):
@@ -93,7 +124,6 @@ if role == "👩‍⚕️ 護理人員派發端":
             
         st.divider()
         
-        # 🌟 修改為單選下拉選單，並加入「(無)」的選項
         st.subheader("📋 步驟 2：需要協助的項目 (單選)")
         task_options = ["(無)", "翻身", "換尿布", "倒尿/回報", "餵食", "NG feeding", "更換全套被服", "pre OP", "pre MRI"]
         selected_task = st.selectbox("病人端照護", task_options)
@@ -133,7 +163,7 @@ if role == "👩‍⚕️ 護理人員派發端":
                 current_db["tasks"].append(new_task)
                 save_data(current_db)
                 st.success("任務已成功送出！")
-                time.sleep(1) # 稍微停頓讓使用者看到成功訊息
+                time.sleep(1)
                 st.rerun()
 
 # ==========================================
@@ -292,8 +322,8 @@ elif role == "📊 後台任務紀錄":
         st.dataframe(df, use_container_width=True)
 
 # ==========================================
-# 🌟 自動刷新邏輯 (放在程式碼最尾端)
+# 自動刷新邏輯
 # ==========================================
 if auto_refresh:
-    time.sleep(10) # 暫停 10 秒
-    st.rerun()     # 重新整理畫面
+    time.sleep(10)
+    st.rerun()
