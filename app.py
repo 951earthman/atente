@@ -4,6 +4,7 @@ import pandas as pd
 import json
 import os
 import uuid
+import time
 
 # --- 設定頁面 ---
 st.set_page_config(page_title="急診護佐任務系統", page_icon="🏥", layout="wide")
@@ -55,7 +56,6 @@ LOCATIONS = {
 
 # --- 側邊欄與同步按鈕 ---
 st.sidebar.title("🏥 系統導覽")
-# 🌟 這裡多加了一個「動態看板」的選項
 role = st.sidebar.radio("請選擇您的角色介面：", [
     "👩‍⚕️ 護理人員派發端", 
     "🧑‍⚕️ 護佐接收端", 
@@ -64,7 +64,12 @@ role = st.sidebar.radio("請選擇您的角色介面：", [
 ])
 
 st.sidebar.divider()
-if st.sidebar.button("🔄 點我同步最新資料", type="primary", use_container_width=True):
+st.sidebar.caption("即時同步設定：")
+# 依據不同角色，預設決定要不要自動更新（看板預設開啟，其他預設關閉以免干擾輸入）
+default_refresh = True if role == "🖥️ 急診動態看板 (觀察系統)" else False
+auto_refresh = st.sidebar.checkbox("🔄 開啟自動更新 (10秒刷新)", value=default_refresh)
+
+if st.sidebar.button("👉 立即手動同步", type="primary", use_container_width=True):
     st.rerun()
 
 # ==========================================
@@ -88,9 +93,10 @@ if role == "👩‍⚕️ 護理人員派發端":
             
         st.divider()
         
-        st.subheader("📋 步驟 2：需要協助的項目 (可複選)")
-        task_options = ["翻身", "換尿布", "倒尿/回報", "餵食", "NG feeding", "更換全套被服", "pre OP", "pre MRI"]
-        selected_tasks = st.multiselect("病人端照護", task_options)
+        # 🌟 修改為單選下拉選單，並加入「(無)」的選項
+        st.subheader("📋 步驟 2：需要協助的項目 (單選)")
+        task_options = ["(無)", "翻身", "換尿布", "倒尿/回報", "餵食", "NG feeding", "更換全套被服", "pre OP", "pre MRI"]
+        selected_task = st.selectbox("病人端照護", task_options)
         
         col4, col5 = st.columns(2)
         with col4:
@@ -104,7 +110,8 @@ if role == "👩‍⚕️ 護理人員派發端":
         is_priority = st.checkbox("⭐ 優先處理 (打勾後此任務會置頂)")
         
         if st.button("🚀 送出呼叫 (Submit)", type="primary"):
-            final_tasks = selected_tasks.copy()
+            final_tasks = []
+            if selected_task != "(無)": final_tasks.append(selected_task)
             if other_task: final_tasks.append(f"其他: {other_task}")
             if iv_cart: final_tasks.append(f"撥補: {iv_cart}")
             
@@ -125,7 +132,9 @@ if role == "👩‍⚕️ 護理人員派發端":
                 }
                 current_db["tasks"].append(new_task)
                 save_data(current_db)
-                st.success("任務已成功送出！請點擊左側「🔄 點我同步最新資料」確保畫面更新。")
+                st.success("任務已成功送出！")
+                time.sleep(1) # 稍微停頓讓使用者看到成功訊息
+                st.rerun()
 
 # ==========================================
 # 畫面二：護佐接收端
@@ -179,6 +188,7 @@ elif role == "🧑‍⚕️ 護佐接收端":
                 current_db["tasks"].append(new_task)
                 save_data(current_db)
                 st.success("自辦任務已登錄！")
+                time.sleep(1)
                 st.rerun()
 
         st.subheader("🔔 待處理任務")
@@ -230,18 +240,17 @@ elif role == "🧑‍⚕️ 護佐接收端":
                         st.rerun()
 
 # ==========================================
-# 🌟 畫面三：急診動態看板 (觀察系統)
+# 畫面三：急診動態看板 (觀察系統)
 # ==========================================
 elif role == "🖥️ 急診動態看板 (觀察系統)":
     st.title("🖥️ 急診護佐即時動態看板")
-    st.info("💡 提示：此畫面建議開在護理站公用螢幕，想看最新動態請隨時點擊左側「🔄 點我同步最新資料」。")
+    st.info("💡 提示：左側欄的「自動更新」打勾後，此畫面會每 10 秒自動抓取最新動態。")
     
     all_tasks = db_data.get("tasks", [])
     pending_tasks = [t for t in all_tasks if t["status"] == "待處理"]
     doing_tasks = [t for t in all_tasks if t["status"] == "執行中"]
     online_nas = db_data.get("online_nas", [])
 
-    # 上方數據儀表板
     col1, col2, col3 = st.columns(3)
     col1.metric("🟢 目前上線護佐", f"{len(online_nas)} 人")
     col2.metric("🟡 執行中任務", f"{len(doing_tasks)} 件")
@@ -249,7 +258,6 @@ elif role == "🖥️ 急診動態看板 (觀察系統)":
     
     st.divider()
     
-    # 執行中動態
     st.subheader("🏃‍♂️ 護佐執行中動態")
     if not doing_tasks:
         st.write("目前大家都在待命，沒有執行中的任務。")
@@ -259,7 +267,6 @@ elif role == "🖥️ 急診動態看板 (觀察系統)":
 
     st.divider()
 
-    # 待處理清單
     st.subheader("📋 等待救援清單 (待處理)")
     pending_tasks.sort(key=lambda x: (not x["priority"], x["time_created"])) 
     if not pending_tasks:
@@ -283,3 +290,10 @@ elif role == "📊 後台任務紀錄":
         df = pd.DataFrame(all_tasks)
         df = df[["time_created", "status", "priority", "location", "items", "assigned_to", "est_time", "time_completed", "id"]]
         st.dataframe(df, use_container_width=True)
+
+# ==========================================
+# 🌟 自動刷新邏輯 (放在程式碼最尾端)
+# ==========================================
+if auto_refresh:
+    time.sleep(10) # 暫停 10 秒
+    st.rerun()     # 重新整理畫面
