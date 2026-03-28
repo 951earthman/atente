@@ -78,38 +78,7 @@ if role == "👩‍⚕️ 護理人員派發端":
     st.title("👩‍⚕️ 護佐任務派發")
     
     online_list = db_data.get("online_nas", [])
-    
-    # 🌟 新增：強制護佐上下線管理區塊
-    with st.expander("⚙️ 護佐上下線管理 (防呆機制)"):
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.markdown("##### 🔴 強制下線 (點擊移除)")
-            if not online_list:
-                st.write("目前無人上線")
-            else:
-                for na in online_list:
-                    if st.button(f"將「{na}」強制下線", key=f"offline_{na}"):
-                        current_db = load_data()
-                        if na in current_db.get("online_nas", []):
-                            current_db["online_nas"].remove(na)
-                            save_data(current_db)
-                        st.rerun()
-        with col_b:
-            st.markdown("##### 🟢 強制上線 (手動新增)")
-            force_na_name = st.text_input("輸入護佐綽號：", key="force_on_input")
-            if st.button("強制上線"):
-                if force_na_name:
-                    current_db = load_data()
-                    if force_na_name not in current_db.get("online_nas", []):
-                        current_db.setdefault("online_nas", []).append(force_na_name)
-                        save_data(current_db)
-                    st.success(f"已將 {force_na_name} 強制上線！")
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.warning("請先輸入綽號")
-
-    # 顯示目前線上名單
+    # 單純顯示名單，將管理權限移交給護佐端
     st.info(f"🟢 目前線上護佐：{', '.join(online_list) if online_list else '目前無人上線'}")
     
     with st.container(border=True):
@@ -172,9 +141,42 @@ if role == "👩‍⚕️ 護理人員派發端":
 elif role == "🧑‍⚕️ 護佐接收端":
     st.title("🧑‍⚕️ 護佐任務看板")
     
+    # 🌟 新增：小組長派發 (協助上下線管理)
+    online_list_leader = db_data.get("online_nas", [])
+    with st.expander("⚙️ 小組長派發 (協助夥伴上下線)"):
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown("##### 🔴 協助下線")
+            if not online_list_leader:
+                st.write("目前無人上線")
+            else:
+                for na in online_list_leader:
+                    if st.button(f"將「{na}」設為下線", key=f"offline_{na}"):
+                        current_db = load_data()
+                        if na in current_db.get("online_nas", []):
+                            current_db["online_nas"].remove(na)
+                            save_data(current_db)
+                        st.rerun()
+        with col_b:
+            st.markdown("##### 🟢 協助上線")
+            leader_na_name = st.text_input("輸入夥伴綽號：", key="leader_on_input")
+            if st.button("設定為上線"):
+                if leader_na_name:
+                    current_db = load_data()
+                    if leader_na_name not in current_db.get("online_nas", []):
+                        current_db.setdefault("online_nas", []).append(leader_na_name)
+                        save_data(current_db)
+                    st.success(f"已協助 {leader_na_name} 上線！")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.warning("請先輸入綽號")
+                    
+    st.divider()
+    
     if not st.session_state.current_user:
         with st.container(border=True):
-            st.write("請輸入您的專屬綽號上線接單：")
+            st.write("請輸入您的專屬綽號登入接單：")
             nickname = st.text_input("綽號 (例如：阿明)")
             if st.button("上線開始接單"):
                 if nickname:
@@ -188,7 +190,7 @@ elif role == "🧑‍⚕️ 護佐接收端":
                     st.warning("請輸入綽號！")
     else:
         st.success(f"歡迎上線，{st.session_state.current_user}！")
-        if st.button("下線"):
+        if st.button("本人下線"):
             current_db = load_data()
             if st.session_state.current_user in current_db.get("online_nas", []):
                 current_db["online_nas"].remove(st.session_state.current_user)
