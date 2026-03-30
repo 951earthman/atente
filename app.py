@@ -10,7 +10,7 @@ import streamlit.components.v1 as components
 # --- 設定頁面 ---
 st.set_page_config(page_title="急診護佐任務系統", page_icon="🏥", layout="wide")
 
-# 🌟 新增：強制轉換為台灣時間 (UTC+8) 的小工具
+# --- 強制轉換為台灣時間 (UTC+8) 的小工具 ---
 def get_tw_time():
     tw_tz = datetime.timezone(datetime.timedelta(hours=8))
     return datetime.datetime.now(tw_tz).strftime("%H:%M:%S")
@@ -109,6 +109,17 @@ auto_refresh = st.sidebar.checkbox("🔄 開啟自動更新 (10秒)", value=(rol
 if st.sidebar.button("👉 立即手動同步", type="primary", use_container_width=True):
     st.rerun()
 
+# 🌟 新增：系統聲明與隱私規範放在側邊欄最下方
+st.sidebar.divider()
+with st.sidebar.expander("⚠️ 系統聲明與隱私規範"):
+    st.markdown("""
+    **👨‍⚕️ 開發與維護：** 本系統由 花蓮慈濟急診 護理師 吳智弘 獨立開發設計。
+    
+    **🛡️ 系統版權與免責聲明：** 本系統為提升急診臨床照護效率所開發之內部輔助工具。系統架構與設計版權歸開發者所有，僅限於單位內部臨床業務交流與工作調度使用，請勿任意重製、外流或作商業用途。系統運作仰賴網路連線，若遇斷線、當機等不可抗力之突發狀況，請同仁依循常規之口頭交班模式進行作業。
+    
+    **🔒 病患隱私保密規定：** 依據《個人資料保護法》及相關醫療法規，使用本系統派發或備註任務時，**嚴禁輸入任何可直接識別病患身分之個人資訊**（例如：病患真實全名、身分證字號、完整病歷號等）。備註欄位請一律以「床號」、「病徵」或「任務代稱」代替，共同守護病患隱私與醫療資訊安全。
+    """)
+
 # ==========================================
 # 畫面一：護理人員派發端
 # ==========================================
@@ -118,7 +129,7 @@ if role == "👩‍⚕️ 護理人員派發端":
     if not st.session_state.current_nurse:
         with st.container(border=True):
             st.info("💡 首次使用請先輸入綽號，方便護佐執行完畢後向您回報。")
-            nurse_name = st.text_input("輸入您的綽號 (例如:急診瘋狗、高麗菜)：")
+            nurse_name = st.text_input("輸入您的綽號 (例如：急診瘋狗、高麗菜)：")
             if st.button("開始派發任務", type="primary"):
                 if nurse_name:
                     st.session_state.current_nurse = nurse_name
@@ -194,7 +205,7 @@ if role == "👩‍⚕️ 護理人員派發端":
                     loc_str = f"{area}" + (f" - {bed}" if bed and bed != "(區域撥補/不需床號)" else " (全區/撥補)")
                     new_task = {
                         "id": str(uuid.uuid4()),
-                        "time_created": get_tw_time(), # 🌟 使用台灣時間
+                        "time_created": get_tw_time(), 
                         "location": loc_str,
                         "items": "、".join(final_items),
                         "priority": is_priority,
@@ -221,7 +232,7 @@ if role == "👩‍⚕️ 護理人員派發端":
                         for item in current_db["tasks"]:
                             if item["id"] == t["id"]:
                                 item["status"] = "已取消"
-                                item["time_completed"] = get_tw_time() # 🌟 使用台灣時間
+                                item["time_completed"] = get_tw_time() 
                                 break
                         save_data(current_db)
                         st.rerun()
@@ -300,7 +311,7 @@ elif role == "🧑‍⚕️ 護佐接收端":
                         for item in current_db["tasks"]:
                             if item["id"] == t["id"]: 
                                 item["status"] = "已取消"
-                                item["time_completed"] = get_tw_time() # 🌟 使用台灣時間
+                                item["time_completed"] = get_tw_time()
                         save_data(current_db); st.rerun()
 
         st.divider()
@@ -316,7 +327,7 @@ elif role == "🧑‍⚕️ 護佐接收端":
                     current_db = load_data()
                     for item in current_db["tasks"]:
                         if item["id"] == t["id"]:
-                            item["status"] = "已完成"; item["time_completed"] = get_tw_time() # 🌟 使用台灣時間
+                            item["status"] = "已完成"; item["time_completed"] = get_tw_time()
                     save_data(current_db); st.rerun()
 
 # ==========================================
