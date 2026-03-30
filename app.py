@@ -118,7 +118,7 @@ if role == "👩‍⚕️ 護理人員派發端":
     if not st.session_state.current_nurse:
         with st.container(border=True):
             st.info("💡 首次使用請先輸入綽號，方便護佐執行完畢後向您回報。")
-            nurse_name = st.text_input("輸入您的綽號 (例如：小莉、A段護理師)：")
+            nurse_name = st.text_input("輸入您的綽號 (例如:急診瘋狗、高麗菜)：")
             if st.button("開始派發任務", type="primary"):
                 if nurse_name:
                     st.session_state.current_nurse = nurse_name
