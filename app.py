@@ -10,12 +10,16 @@ import streamlit.components.v1 as components
 # --- 設定頁面 ---
 st.set_page_config(page_title="急診護佐任務系統", page_icon="🏥", layout="wide")
 
+# 🌟 新增：強制轉換為台灣時間 (UTC+8) 的小工具
+def get_tw_time():
+    tw_tz = datetime.timezone(datetime.timedelta(hours=8))
+    return datetime.datetime.now(tw_tz).strftime("%H:%M:%S")
+
 # --- 共用筆記本 (JSON) 設定 ---
 DB_FILE = "data.json"
 
 def init_db():
     if not os.path.exists(DB_FILE):
-        # 🌟 新增 online_nurses 陣列
         with open(DB_FILE, "w", encoding="utf-8") as f:
             json.dump({"tasks": [], "online_nas": [], "online_nurses": []}, f, ensure_ascii=False, indent=4)
 
@@ -24,7 +28,6 @@ def load_data():
     try:
         with open(DB_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            # 確保舊資料檔也有 online_nurses 鍵值
             if "online_nurses" not in data:
                 data["online_nurses"] = []
             return data
@@ -39,13 +42,13 @@ db_data = load_data()
 
 # --- 初始化個人設備記憶 ---
 if 'current_user' not in st.session_state:
-    st.session_state.current_user = None # 護佐用
+    st.session_state.current_user = None 
 if 'current_nurse' not in st.session_state:
-    st.session_state.current_nurse = None # 護理師用
+    st.session_state.current_nurse = None 
 if 'alerted_tasks' not in st.session_state:
     st.session_state.alerted_tasks = set()
 
-# 🌟 同步檢查：如果被別人強制下線，清除本地登入狀態
+# --- 同步檢查：如果被別人強制下線，清除本地登入狀態 ---
 if st.session_state.current_nurse and st.session_state.current_nurse not in db_data.get("online_nurses", []):
     st.session_state.current_nurse = None
 if st.session_state.current_user and st.session_state.current_user not in db_data.get("online_nas", []):
@@ -73,7 +76,7 @@ role = st.sidebar.radio("請選擇角色介面：", [
 
 st.sidebar.divider()
 
-# 🌟 新增：左側邊欄的全局「管理線上人員」
+# --- 左側邊欄：管理線上人員 ---
 with st.sidebar.expander("⚙️ 管理線上人員 (強制下線)"):
     current_db = load_data()
     
@@ -115,11 +118,10 @@ if role == "👩‍⚕️ 護理人員派發端":
     if not st.session_state.current_nurse:
         with st.container(border=True):
             st.info("💡 首次使用請先輸入綽號，方便護佐執行完畢後向您回報。")
-            nurse_name = st.text_input("輸入您的綽號 (例如：急診瘋狗、高麗菜)：")
+            nurse_name = st.text_input("輸入您的綽號 (例如：小莉、A段護理師)：")
             if st.button("開始派發任務", type="primary"):
                 if nurse_name:
                     st.session_state.current_nurse = nurse_name
-                    # 將護理師加入線上名單庫
                     current_db = load_data()
                     if nurse_name not in current_db.get("online_nurses", []):
                         current_db.setdefault("online_nurses", []).append(nurse_name)
@@ -192,7 +194,7 @@ if role == "👩‍⚕️ 護理人員派發端":
                     loc_str = f"{area}" + (f" - {bed}" if bed and bed != "(區域撥補/不需床號)" else " (全區/撥補)")
                     new_task = {
                         "id": str(uuid.uuid4()),
-                        "time_created": datetime.datetime.now().strftime("%H:%M:%S"),
+                        "time_created": get_tw_time(), # 🌟 使用台灣時間
                         "location": loc_str,
                         "items": "、".join(final_items),
                         "priority": is_priority,
@@ -219,7 +221,7 @@ if role == "👩‍⚕️ 護理人員派發端":
                         for item in current_db["tasks"]:
                             if item["id"] == t["id"]:
                                 item["status"] = "已取消"
-                                item["time_completed"] = datetime.datetime.now().strftime("%H:%M:%S")
+                                item["time_completed"] = get_tw_time() # 🌟 使用台灣時間
                                 break
                         save_data(current_db)
                         st.rerun()
@@ -253,7 +255,6 @@ elif role == "🧑‍⚕️ 護佐接收端":
         
         st.divider()
         
-        # 優先任務警報系統邏輯
         pending = [t for t in db_data.get("tasks", []) if t["status"] == "待處理"]
         pending.sort(key=lambda x: (not x["priority"], x["time_created"]))
         
@@ -297,7 +298,9 @@ elif role == "🧑‍⚕️ 護佐接收端":
                     if st.button("取消", key=f"cancel_na_{t['id']}"):
                         current_db = load_data()
                         for item in current_db["tasks"]:
-                            if item["id"] == t["id"]: item["status"] = "已取消"
+                            if item["id"] == t["id"]: 
+                                item["status"] = "已取消"
+                                item["time_completed"] = get_tw_time() # 🌟 使用台灣時間
                         save_data(current_db); st.rerun()
 
         st.divider()
@@ -313,7 +316,7 @@ elif role == "🧑‍⚕️ 護佐接收端":
                     current_db = load_data()
                     for item in current_db["tasks"]:
                         if item["id"] == t["id"]:
-                            item["status"] = "已完成"; item["time_completed"] = datetime.datetime.now().strftime("%H:%M:%S")
+                            item["status"] = "已完成"; item["time_completed"] = get_tw_time() # 🌟 使用台灣時間
                     save_data(current_db); st.rerun()
 
 # ==========================================
