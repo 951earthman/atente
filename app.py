@@ -5,6 +5,7 @@ import json
 import os
 import uuid
 import time
+import streamlit.components.v1 as components # 🌟 新增：用來載入提示音與震動的套件
 
 # --- 設定頁面 ---
 st.set_page_config(page_title="急診護佐任務系統", page_icon="🏥", layout="wide")
@@ -35,7 +36,11 @@ db_data = load_data()
 if 'current_user' not in st.session_state:
     st.session_state.current_user = None
 
-# --- 床位資料 (簡化版：拿掉次區域) ---
+# 🌟 新增：用來記錄「已經響過警報」的任務 ID，避免每次畫面重整都一直叫
+if 'alerted_tasks' not in st.session_state:
+    st.session_state.alerted_tasks = set()
+
+# --- 床位資料 ---
 BED_DATA = {
     "留觀(OBS)": ["1", "2", "3", "5", "6", "7", "8", "9", "10", "11", "12", "13", "15", "16", "17", "18", "19", "20", "21", "22", "23", "25", "26", "27", "28", "29", "30", "31", "32", "33", "35", "36", "37", "38", "39"],
     "診間": ["5", "6", "11", "12", "13", "15", "16", "17", "18", "19", "20", "21", "22", "23", "25", "27", "28", "29", "30", "31", "32", "33", "36", "37", "38", "39"],
@@ -56,7 +61,7 @@ role = st.sidebar.radio("請選擇角色介面：", [
 ])
 
 st.sidebar.divider()
-auto_refresh = st.sidebar.checkbox("🔄 開啟自動更新 (10秒)", value=(role == "🖥️ 急診動態看板"))
+auto_refresh = st.sidebar.checkbox("🔄 開啟自動更新 (10秒)", value=(role == "🖥️ 急診動態看板" or role == "🧑‍⚕️ 護佐接收端"))
 if st.sidebar.button("👉 立即手動同步", type="primary", use_container_width=True):
     st.rerun()
 
@@ -69,7 +74,6 @@ if role == "👩‍⚕️ 護理人員派發端":
     online_list = db_data.get("online_nas", [])
     st.info(f"🟢 目前線上：{', '.join(online_list) if online_list else '無人上線'}")
     
-    # --- 步驟 1：位置 ---
     with st.container(border=True):
         st.subheader("📍 步驟 1：選擇位置")
         col1, col2 = st.columns(2)
@@ -87,12 +91,10 @@ if role == "👩‍⚕️ 護理人員派發端":
 
         st.divider()
         
-        # --- 步驟 2：項目視覺化勾選 ---
         st.subheader("📋 步驟 2：需要協助的項目 (可多選)")
         task_list = ["翻身", "換尿布", "倒尿/回報", "餵食", "NG feeding", "更換全套被服", "pre OP", "pre MRI"]
         
         selected_checkboxes = []
-        # 分成三欄顯示，視覺更清晰
         check_cols = st.columns(3)
         for i, t_name in enumerate(task_list):
             with check_cols[i % 3]:
@@ -107,7 +109,6 @@ if role == "👩‍⚕️ 護理人員派發端":
 
         st.divider()
         
-        # --- 步驟 3：優先與送出 ---
         is_priority = st.toggle("⭐ 優先處理 (急件請開啟)", value=False)
         
         if st.button("🚀 送出呼叫 (Submit)", type="primary", use_container_width=True):
@@ -137,7 +138,6 @@ if role == "👩‍⚕️ 護理人員派發端":
                 time.sleep(0.5)
                 st.rerun()
 
-    # --- 增加：任務取消按鈕 (護理端可取消誤點任務) ---
     st.divider()
     st.subheader("🗑️ 進行中任務管理 (可取消)")
     active_tasks = [t for t in db_data.get("tasks", []) if t["status"] in ["待處理", "執行中"]]
@@ -146,7 +146,6 @@ if role == "👩‍⚕️ 護理人員派發端":
             with st.expander(f"【{t['status']}】{t['location']} - {t['items']}"):
                 if st.button(f"❌ 取消此任務", key=f"cancel_nurse_{t['id']}"):
                     current_db = load_data()
-                    # 改為狀態標記或直接移除，這裡採取直接標記為「已取消」
                     for item in current_db["tasks"]:
                         if item["id"] == t["id"]:
                             item["status"] = "已取消"
@@ -183,7 +182,6 @@ elif role == "🧑‍⚕️ 護佐接收端":
             st.rerun()
         
         st.divider()
-        # 小組長派發
         with st.expander("⚙️ 小組長管理夥伴狀態"):
             leader_na = st.text_input("夥伴綽號：")
             btn_on, btn_off = st.columns(2)
@@ -192,11 +190,37 @@ elif role == "🧑‍⚕️ 護佐接收端":
             if btn_off.button("協助下線"):
                 current_db = load_data(); current_db["online_nas"].remove(leader_na); save_data(current_db); st.rerun()
 
-        # 任務清單
-        st.subheader("🔔 待接單")
+        # 🌟 優先任務警報系統邏輯
         pending = [t for t in db_data.get("tasks", []) if t["status"] == "待處理"]
         pending.sort(key=lambda x: (not x["priority"], x["time_created"]))
         
+        new_priority_found = False
+        for t in pending:
+            # 如果是優先任務，且這個 ID 還沒被警告過
+            if t["priority"] and t["id"] not in st.session_state.alerted_tasks:
+                st.toast(f"🚨 優先任務：{t['location']} 需要協助！", icon="🚨")
+                st.session_state.alerted_tasks.add(t["id"])
+                new_priority_found = True
+        
+        # 如果發現新的優先任務，觸發 HTML/JS 的聲音與震動
+        if new_priority_found:
+            audio_js = """
+            <script>
+                // 觸發震動 (連續震動模式：震動500ms，停200ms，再震動500ms)
+                if (navigator.vibrate) {
+                    navigator.vibrate([500, 200, 500, 200, 500]);
+                }
+                // 播放警示音 (使用無版權的 Google 內建音效網址)
+                var audio = new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');
+                audio.play().catch(function(error) {
+                    console.log("瀏覽器阻擋了自動播放音效");
+                });
+            </script>
+            """
+            components.html(audio_js, height=0)
+
+        # 任務清單顯示
+        st.subheader("🔔 待接單")
         for t in pending:
             with st.container(border=True):
                 col_t, col_b = st.columns([3, 1])
@@ -210,7 +234,6 @@ elif role == "🧑‍⚕️ 護佐接收端":
                             if item["id"] == t["id"]:
                                 item["status"] = "執行中"; item["assigned_to"] = st.session_state.current_user; item["est_time"] = est
                         save_data(current_db); st.rerun()
-                    # 護佐端也可以取消（例如點錯或口頭取消）
                     if st.button("取消", key=f"cancel_na_{t['id']}"):
                         current_db = load_data()
                         for item in current_db["tasks"]:
