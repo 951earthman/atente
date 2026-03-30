@@ -15,16 +15,21 @@ DB_FILE = "data.json"
 
 def init_db():
     if not os.path.exists(DB_FILE):
+        # 🌟 新增 online_nurses 陣列
         with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump({"tasks": [], "online_nas": []}, f, ensure_ascii=False, indent=4)
+            json.dump({"tasks": [], "online_nas": [], "online_nurses": []}, f, ensure_ascii=False, indent=4)
 
 def load_data():
     init_db()
     try:
         with open(DB_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            # 確保舊資料檔也有 online_nurses 鍵值
+            if "online_nurses" not in data:
+                data["online_nurses"] = []
+            return data
     except:
-        return {"tasks": [], "online_nas": []}
+        return {"tasks": [], "online_nas": [], "online_nurses": []}
 
 def save_data(data):
     with open(DB_FILE, "w", encoding="utf-8") as f:
@@ -39,6 +44,12 @@ if 'current_nurse' not in st.session_state:
     st.session_state.current_nurse = None # 護理師用
 if 'alerted_tasks' not in st.session_state:
     st.session_state.alerted_tasks = set()
+
+# 🌟 同步檢查：如果被別人強制下線，清除本地登入狀態
+if st.session_state.current_nurse and st.session_state.current_nurse not in db_data.get("online_nurses", []):
+    st.session_state.current_nurse = None
+if st.session_state.current_user and st.session_state.current_user not in db_data.get("online_nas", []):
+    st.session_state.current_user = None
 
 # --- 床位資料 ---
 BED_DATA = {
@@ -61,6 +72,36 @@ role = st.sidebar.radio("請選擇角色介面：", [
 ])
 
 st.sidebar.divider()
+
+# 🌟 新增：左側邊欄的全局「管理線上人員」
+with st.sidebar.expander("⚙️ 管理線上人員 (強制下線)"):
+    current_db = load_data()
+    
+    st.markdown("##### 👩‍⚕️ 護理人員")
+    online_nurses = current_db.get("online_nurses", [])
+    if online_nurses:
+        target_nurse = st.selectbox("選擇要下線的護理師：", online_nurses)
+        if st.button("強制護理師下線", use_container_width=True):
+            current_db["online_nurses"].remove(target_nurse)
+            save_data(current_db)
+            st.rerun()
+    else:
+        st.caption("無護理人員上線")
+        
+    st.divider()
+    
+    st.markdown("##### 🧑‍⚕️ 護佐人員")
+    online_nas = current_db.get("online_nas", [])
+    if online_nas:
+        target_na = st.selectbox("選擇要下線的護佐：", online_nas)
+        if st.button("強制護佐下線", use_container_width=True):
+            current_db["online_nas"].remove(target_na)
+            save_data(current_db)
+            st.rerun()
+    else:
+        st.caption("無護佐上線")
+
+st.sidebar.divider()
 auto_refresh = st.sidebar.checkbox("🔄 開啟自動更新 (10秒)", value=(role == "🖥️ 急診動態看板" or role == "🧑‍⚕️ 護佐接收端"))
 if st.sidebar.button("👉 立即手動同步", type="primary", use_container_width=True):
     st.rerun()
@@ -71,7 +112,6 @@ if st.sidebar.button("👉 立即手動同步", type="primary", use_container_wi
 if role == "👩‍⚕️ 護理人員派發端":
     st.title("👩‍⚕️ 任務派發")
     
-    # 🌟 新增：護理人員登入機制
     if not st.session_state.current_nurse:
         with st.container(border=True):
             st.info("💡 首次使用請先輸入綽號，方便護佐執行完畢後向您回報。")
@@ -79,16 +119,24 @@ if role == "👩‍⚕️ 護理人員派發端":
             if st.button("開始派發任務", type="primary"):
                 if nurse_name:
                     st.session_state.current_nurse = nurse_name
+                    # 將護理師加入線上名單庫
+                    current_db = load_data()
+                    if nurse_name not in current_db.get("online_nurses", []):
+                        current_db.setdefault("online_nurses", []).append(nurse_name)
+                        save_data(current_db)
                     st.rerun()
                 else:
                     st.warning("請先輸入綽號！")
     else:
-        # 已登入的派發畫面
         col_greet, col_logout = st.columns([4, 1])
         with col_greet:
             st.success(f"你好，護理師 {st.session_state.current_nurse}")
         with col_logout:
-            if st.button("登出更換人員"):
+            if st.button("本人下線"):
+                current_db = load_data()
+                if st.session_state.current_nurse in current_db.get("online_nurses", []):
+                    current_db["online_nurses"].remove(st.session_state.current_nurse)
+                    save_data(current_db)
                 st.session_state.current_nurse = None
                 st.rerun()
 
@@ -152,7 +200,7 @@ if role == "👩‍⚕️ 護理人員派發端":
                         "assigned_to": "",
                         "est_time": "",
                         "time_completed": "",
-                        "dispatched_by": st.session_state.current_nurse # 🌟 紀錄是誰發的單
+                        "dispatched_by": st.session_state.current_nurse
                     }
                     current_db["tasks"].append(new_task)
                     save_data(current_db)
@@ -205,26 +253,6 @@ elif role == "🧑‍⚕️ 護佐接收端":
         
         st.divider()
         
-        # 🌟 修改：小組長協助下線 (改成下拉選單防呆，且拿掉協助上線)
-        with st.expander("⚙️ 小組長協助夥伴下線"):
-            online_nas_list = db_data.get("online_nas", [])
-            if online_nas_list:
-                col_sel, col_btn = st.columns([3, 1])
-                with col_sel:
-                    target_na = st.selectbox("選擇忘記登出的夥伴：", online_nas_list)
-                with col_btn:
-                    st.write("\n") # 排版對齊用
-                    if st.button("強制下線"):
-                        current_db = load_data()
-                        if target_na in current_db.get("online_nas", []):
-                            current_db["online_nas"].remove(target_na)
-                            save_data(current_db)
-                        st.success(f"已將 {target_na} 下線")
-                        time.sleep(0.5)
-                        st.rerun()
-            else:
-                st.write("目前無夥伴在線上。")
-
         # 優先任務警報系統邏輯
         pending = [t for t in db_data.get("tasks", []) if t["status"] == "待處理"]
         pending.sort(key=lambda x: (not x["priority"], x["time_created"]))
@@ -246,7 +274,6 @@ elif role == "🧑‍⚕️ 護佐接收端":
             """
             components.html(audio_js, height=0)
 
-        # 任務清單顯示 (🌟 加上發單人資訊)
         st.subheader("🔔 待接單")
         if not pending:
             st.info("目前無待處理任務。")
@@ -324,9 +351,7 @@ elif role == "📊 歷史紀錄":
     st.title("📊 任務紀錄")
     df = pd.DataFrame(db_data.get("tasks", []))
     if not df.empty:
-        # 🌟 將發單人 (dispatched_by) 也加入報表
         cols_to_show = ["time_created", "status", "dispatched_by", "location", "items", "assigned_to", "time_completed"]
-        # 確保即使舊資料沒有 dispatched_by 欄位也不會報錯
         for col in cols_to_show:
             if col not in df.columns:
                 df[col] = "未紀錄"
