@@ -19,55 +19,44 @@ def init_db():
 
 def load_data():
     init_db()
-    with open(DB_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(DB_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return {"tasks": [], "online_nas": []}
 
 def save_data(data):
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-# 每次網頁重整或操作時，讀取最新資料
 db_data = load_data()
 
-# --- 初始化個人設備記憶 (Session State) ---
+# --- 初始化個人設備記憶 ---
 if 'current_user' not in st.session_state:
     st.session_state.current_user = None
 
-# --- 床位資料字典 ---
-LOCATIONS = {
-    "留觀(OBS)": {
-        "OBS 1": ["1", "2", "3", "5", "6", "7", "8", "9", "10", "35", "36", "37", "38"],
-        "OBS 2": ["11", "12", "13", "15", "16", "17", "18", "19", "20", "21", "22", "23"],
-        "OBS 3": ["25", "26", "27", "28", "29", "30", "31", "32", "33", "39"]
-    },
-    "診間": {
-        "第一診間": ["11", "12", "13", "15", "21", "22", "23", "25"],
-        "第二診間": ["16", "17", "18", "19", "20", "36", "37", "38"],
-        "第三診間": ["5", "6", "27", "28", "29", "30", "31", "32", "33", "39"]
-    },
-    "兒科": {
-        "兒科區": ["501", "502", "503", "505", "506", "507", "508", "509"]
-    },
-    "急救區": {"無特定床號": ["急救區"]},
-    "檢傷": {"無特定床號": ["檢傷"]},
-    "縫合室": {"無特定床號": ["縫合室"]},
-    "超音波室": {"無特定床號": ["超音波室"]}
+# --- 床位資料 (簡化版：拿掉次區域) ---
+BED_DATA = {
+    "留觀(OBS)": ["1", "2", "3", "5", "6", "7", "8", "9", "10", "11", "12", "13", "15", "16", "17", "18", "19", "20", "21", "22", "23", "25", "26", "27", "28", "29", "30", "31", "32", "33", "35", "36", "37", "38", "39"],
+    "診間": ["5", "6", "11", "12", "13", "15", "16", "17", "18", "19", "20", "21", "22", "23", "25", "27", "28", "29", "30", "31", "32", "33", "36", "37", "38", "39"],
+    "兒科": ["501", "502", "503", "505", "506", "507", "508", "509"],
+    "急救區": [],
+    "檢傷": [],
+    "縫合室": [],
+    "超音波室": []
 }
 
-# --- 側邊欄與同步按鈕 ---
+# --- 側邊欄 ---
 st.sidebar.title("🏥 系統導覽")
-role = st.sidebar.radio("請選擇您的角色介面：", [
+role = st.sidebar.radio("請選擇角色介面：", [
     "👩‍⚕️ 護理人員派發端", 
     "🧑‍⚕️ 護佐接收端", 
-    "🖥️ 急診動態看板 (觀察系統)", 
-    "📊 後台任務紀錄"
+    "🖥️ 急診動態看板", 
+    "📊 歷史紀錄"
 ])
 
 st.sidebar.divider()
-st.sidebar.caption("即時同步設定：")
-default_refresh = True if role == "🖥️ 急診動態看板 (觀察系統)" else False
-auto_refresh = st.sidebar.checkbox("🔄 開啟自動更新 (10秒刷新)", value=default_refresh)
-
+auto_refresh = st.sidebar.checkbox("🔄 開啟自動更新 (10秒)", value=(role == "🖥️ 急診動態看板"))
 if st.sidebar.button("👉 立即手動同步", type="primary", use_container_width=True):
     st.rerun()
 
@@ -75,54 +64,67 @@ if st.sidebar.button("👉 立即手動同步", type="primary", use_container_wi
 # 畫面一：護理人員派發端
 # ==========================================
 if role == "👩‍⚕️ 護理人員派發端":
-    st.title("👩‍⚕️ 護佐任務派發")
+    st.title("👩‍⚕️ 任務派發")
     
     online_list = db_data.get("online_nas", [])
-    # 單純顯示名單，將管理權限移交給護佐端
-    st.info(f"🟢 目前線上護佐：{', '.join(online_list) if online_list else '目前無人上線'}")
+    st.info(f"🟢 目前線上：{', '.join(online_list) if online_list else '無人上線'}")
     
+    # --- 步驟 1：位置 ---
     with st.container(border=True):
         st.subheader("📍 步驟 1：選擇位置")
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
-            main_area = st.selectbox("大區域", list(LOCATIONS.keys()))
+            area = st.selectbox("大區域", list(BED_DATA.keys()))
         with col2:
-            sub_area = st.selectbox("次區域/分區", list(LOCATIONS[main_area].keys()))
-        with col3:
-            bed = st.selectbox("床號", LOCATIONS[main_area][sub_area])
-            
+            beds_in_area = BED_DATA[area]
+            if beds_in_area:
+                bed_options = ["(區域撥補/不需床號)"] + beds_in_area
+                bed = st.selectbox("床號", bed_options)
+            else:
+                st.write("\n")
+                st.info("此區域不需選擇床號")
+                bed = ""
+
         st.divider()
         
-        st.subheader("📋 步驟 2：需要協助的項目 (單選)")
-        task_options = ["(無)", "翻身", "換尿布", "倒尿/回報", "餵食", "NG feeding", "更換全套被服", "pre OP", "pre MRI"]
-        selected_task = st.selectbox("病人端照護", task_options)
+        # --- 步驟 2：項目視覺化勾選 ---
+        st.subheader("📋 步驟 2：需要協助的項目 (可多選)")
+        task_list = ["翻身", "換尿布", "倒尿/回報", "餵食", "NG feeding", "更換全套被服", "pre OP", "pre MRI"]
         
-        col4, col5 = st.columns(2)
-        with col4:
-            other_task = st.text_input("其他照護協助 (自行輸入)")
-        with col5:
-            iv_cart = st.text_input("區域後勤：第幾號 IV車輛/醫材需要撥補？")
-            
+        selected_checkboxes = []
+        # 分成三欄顯示，視覺更清晰
+        check_cols = st.columns(3)
+        for i, t_name in enumerate(task_list):
+            with check_cols[i % 3]:
+                if st.checkbox(t_name, key=f"chk_{t_name}"):
+                    selected_checkboxes.append(t_name)
+        
+        col_other1, col_other2 = st.columns(2)
+        with col_other1:
+            other_input = st.text_input("其他協助 (自行輸入)")
+        with col_other2:
+            iv_input = st.text_input("IV車/醫材撥補 (填入車號)")
+
         st.divider()
         
-        st.subheader("🚨 步驟 3：急件設定")
-        is_priority = st.checkbox("⭐ 優先處理 (打勾後此任務會置頂)")
+        # --- 步驟 3：優先與送出 ---
+        is_priority = st.toggle("⭐ 優先處理 (急件請開啟)", value=False)
         
-        if st.button("🚀 送出呼叫 (Submit)", type="primary"):
-            final_tasks = []
-            if selected_task != "(無)": final_tasks.append(selected_task)
-            if other_task: final_tasks.append(f"其他: {other_task}")
-            if iv_cart: final_tasks.append(f"撥補: {iv_cart}")
+        if st.button("🚀 送出呼叫 (Submit)", type="primary", use_container_width=True):
+            final_items = selected_checkboxes.copy()
+            if other_input: final_items.append(f"其他:{other_input}")
+            if iv_input: final_items.append(f"撥補:{iv_input}")
             
-            if not final_tasks:
-                st.error("請至少選擇或輸入一項任務！")
+            if not final_items:
+                st.error("請至少選擇或輸入一個項目！")
             else:
                 current_db = load_data()
+                loc_str = f"{area}" + (f" - {bed}" if bed and bed != "(區域撥補/不需床號)" else " (全區/撥補)")
                 new_task = {
                     "id": str(uuid.uuid4()),
                     "time_created": datetime.datetime.now().strftime("%H:%M:%S"),
-                    "location": f"{main_area} - {sub_area} {bed if bed not in ['急救區', '檢傷', '縫合室', '超音波室'] else ''}",
-                    "items": ", ".join(final_tasks),
+                    "location": loc_str,
+                    "items": "、".join(final_items),
                     "priority": is_priority,
                     "status": "待處理", 
                     "assigned_to": "",
@@ -131,54 +133,38 @@ if role == "👩‍⚕️ 護理人員派發端":
                 }
                 current_db["tasks"].append(new_task)
                 save_data(current_db)
-                st.success("任務已成功送出！")
-                time.sleep(1)
+                st.success("任務已送出！")
+                time.sleep(0.5)
                 st.rerun()
+
+    # --- 增加：任務取消按鈕 (護理端可取消誤點任務) ---
+    st.divider()
+    st.subheader("🗑️ 進行中任務管理 (可取消)")
+    active_tasks = [t for t in db_data.get("tasks", []) if t["status"] in ["待處理", "執行中"]]
+    if active_tasks:
+        for t in active_tasks:
+            with st.expander(f"【{t['status']}】{t['location']} - {t['items']}"):
+                if st.button(f"❌ 取消此任務", key=f"cancel_nurse_{t['id']}"):
+                    current_db = load_data()
+                    # 改為狀態標記或直接移除，這裡採取直接標記為「已取消」
+                    for item in current_db["tasks"]:
+                        if item["id"] == t["id"]:
+                            item["status"] = "已取消"
+                            item["time_completed"] = datetime.datetime.now().strftime("%H:%M:%S")
+                            break
+                    save_data(current_db)
+                    st.rerun()
 
 # ==========================================
 # 畫面二：護佐接收端
 # ==========================================
 elif role == "🧑‍⚕️ 護佐接收端":
-    st.title("🧑‍⚕️ 護佐任務看板")
-    
-    # 🌟 新增：小組長派發 (協助上下線管理)
-    online_list_leader = db_data.get("online_nas", [])
-    with st.expander("⚙️ 小組長派發 (協助夥伴上下線)"):
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.markdown("##### 🔴 協助下線")
-            if not online_list_leader:
-                st.write("目前無人上線")
-            else:
-                for na in online_list_leader:
-                    if st.button(f"將「{na}」設為下線", key=f"offline_{na}"):
-                        current_db = load_data()
-                        if na in current_db.get("online_nas", []):
-                            current_db["online_nas"].remove(na)
-                            save_data(current_db)
-                        st.rerun()
-        with col_b:
-            st.markdown("##### 🟢 協助上線")
-            leader_na_name = st.text_input("輸入夥伴綽號：", key="leader_on_input")
-            if st.button("設定為上線"):
-                if leader_na_name:
-                    current_db = load_data()
-                    if leader_na_name not in current_db.get("online_nas", []):
-                        current_db.setdefault("online_nas", []).append(leader_na_name)
-                        save_data(current_db)
-                    st.success(f"已協助 {leader_na_name} 上線！")
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.warning("請先輸入綽號")
-                    
-    st.divider()
+    st.title("🧑‍⚕️ 接收端")
     
     if not st.session_state.current_user:
         with st.container(border=True):
-            st.write("請輸入您的專屬綽號登入接單：")
-            nickname = st.text_input("綽號 (例如：阿明)")
-            if st.button("上線開始接單"):
+            nickname = st.text_input("輸入綽號登入：")
+            if st.button("登入"):
                 if nickname:
                     st.session_state.current_user = nickname
                     current_db = load_data()
@@ -186,146 +172,104 @@ elif role == "🧑‍⚕️ 護佐接收端":
                         current_db.setdefault("online_nas", []).append(nickname)
                         save_data(current_db)
                     st.rerun()
-                else:
-                    st.warning("請輸入綽號！")
     else:
-        st.success(f"歡迎上線，{st.session_state.current_user}！")
-        if st.button("本人下線"):
+        st.success(f"你好，{st.session_state.current_user}")
+        if st.button("下線"):
             current_db = load_data()
             if st.session_state.current_user in current_db.get("online_nas", []):
                 current_db["online_nas"].remove(st.session_state.current_user)
                 save_data(current_db)
             st.session_state.current_user = None
             st.rerun()
-            
+        
         st.divider()
-        
-        with st.expander("➕ 新增自辦任務 (定時撥補、口頭交辦等)"):
-            self_task_type = st.selectbox("任務類型", ["定時醫材/IV撥補", "定時被服撥補", "接獲口頭交辦", "其他"])
-            self_task_other = st.text_input("備註說明")
-            self_est_time = st.selectbox("預估執行時間", ["5 分鐘", "10 分鐘", "15 分鐘", "30 分鐘"])
-            if st.button("開始執行自辦任務"):
-                current_db = load_data()
-                new_task = {
-                    "id": str(uuid.uuid4()),
-                    "time_created": datetime.datetime.now().strftime("%H:%M:%S"),
-                    "location": "自主任務",
-                    "items": f"{self_task_type} - {self_task_other}",
-                    "priority": False,
-                    "status": "執行中",
-                    "assigned_to": st.session_state.current_user,
-                    "est_time": self_est_time,
-                    "time_completed": ""
-                }
-                current_db["tasks"].append(new_task)
-                save_data(current_db)
-                st.success("自辦任務已登錄！")
-                time.sleep(1)
-                st.rerun()
+        # 小組長派發
+        with st.expander("⚙️ 小組長管理夥伴狀態"):
+            leader_na = st.text_input("夥伴綽號：")
+            btn_on, btn_off = st.columns(2)
+            if btn_on.button("協助上線"):
+                current_db = load_data(); current_db.setdefault("online_nas", []).append(leader_na); save_data(current_db); st.rerun()
+            if btn_off.button("協助下線"):
+                current_db = load_data(); current_db["online_nas"].remove(leader_na); save_data(current_db); st.rerun()
 
-        st.subheader("🔔 待處理任務")
-        pending_tasks = [t for t in db_data.get("tasks", []) if t["status"] == "待處理"]
-        pending_tasks.sort(key=lambda x: (not x["priority"], x["time_created"])) 
+        # 任務清單
+        st.subheader("🔔 待接單")
+        pending = [t for t in db_data.get("tasks", []) if t["status"] == "待處理"]
+        pending.sort(key=lambda x: (not x["priority"], x["time_created"]))
         
-        if not pending_tasks:
-            st.info("目前沒有待處理的任務。")
-        else:
-            for task in pending_tasks:
-                with st.container(border=True):
-                    col1, col2 = st.columns([3, 1])
-                    with col1:
-                        if task["priority"]:
-                            st.error(f"⭐ [優先] 地點：{task['location']} | 任務：{task['items']} | 送出時間：{task['time_created']}")
-                        else:
-                            st.write(f"地點：{task['location']} | 任務：{task['items']} | 送出時間：{task['time_created']}")
-                    with col2:
-                        est = st.selectbox("預估時間", ["5 分鐘", "10 分鐘", "15 分鐘"], key=f"est_{task['id']}")
-                        if st.button("點擊接單", key=f"btn_{task['id']}", type="primary"):
-                            current_db = load_data()
-                            for t in current_db["tasks"]:
-                                if t["id"] == task["id"]:
-                                    t["status"] = "執行中"
-                                    t["assigned_to"] = st.session_state.current_user
-                                    t["est_time"] = est
-                                    break
-                            save_data(current_db)
-                            st.rerun()
+        for t in pending:
+            with st.container(border=True):
+                col_t, col_b = st.columns([3, 1])
+                with col_t:
+                    st.error(f"⭐ [優先] {t['location']} - {t['items']}") if t["priority"] else st.write(f"{t['location']} - {t['items']}")
+                with col_b:
+                    est = st.selectbox("預估時間", ["5分", "10分", "15分"], key=f"est_{t['id']}")
+                    if st.button("接單", key=f"get_{t['id']}", type="primary"):
+                        current_db = load_data()
+                        for item in current_db["tasks"]:
+                            if item["id"] == t["id"]:
+                                item["status"] = "執行中"; item["assigned_to"] = st.session_state.current_user; item["est_time"] = est
+                        save_data(current_db); st.rerun()
+                    # 護佐端也可以取消（例如點錯或口頭取消）
+                    if st.button("取消", key=f"cancel_na_{t['id']}"):
+                        current_db = load_data()
+                        for item in current_db["tasks"]:
+                            if item["id"] == t["id"]: item["status"] = "已取消"
+                        save_data(current_db); st.rerun()
 
         st.divider()
         st.subheader("🟡 我的執行中任務")
         my_tasks = [t for t in db_data.get("tasks", []) if t["status"] == "執行中" and t["assigned_to"] == st.session_state.current_user]
-        
-        if not my_tasks:
-            st.write("目前無執行中任務，🟢 待命中。")
-        else:
-            for task in my_tasks:
-                with st.container(border=True):
-                    st.warning(f"地點：{task['location']} | 任務：{task['items']} | 預估：{task['est_time']}")
-                    if st.button("✅ 任務完成", key=f"done_{task['id']}"):
-                        current_db = load_data()
-                        for t in current_db["tasks"]:
-                            if t["id"] == task["id"]:
-                                t["status"] = "已完成"
-                                t["time_completed"] = datetime.datetime.now().strftime("%H:%M:%S")
-                                break
-                        save_data(current_db)
-                        st.rerun()
+        for t in my_tasks:
+            with st.container(border=True):
+                st.warning(f"{t['location']} - {t['items']} (預估:{t['est_time']})")
+                if st.button("✅ 完成任務", key=f"done_{t['id']}"):
+                    current_db = load_data()
+                    for item in current_db["tasks"]:
+                        if item["id"] == t["id"]:
+                            item["status"] = "已完成"; item["time_completed"] = datetime.datetime.now().strftime("%H:%M:%S")
+                    save_data(current_db); st.rerun()
 
 # ==========================================
-# 畫面三：急診動態看板 (觀察系統)
+# 畫面三：急診動態看板
 # ==========================================
-elif role == "🖥️ 急診動態看板 (觀察系統)":
-    st.title("🖥️ 急診護佐即時動態看板")
-    st.info("💡 提示：左側欄的「自動更新」打勾後，此畫面會每 10 秒自動抓取最新動態。")
-    
+elif role == "🖥️ 急診動態看板":
+    st.title("🖥️ 即時看板")
     all_tasks = db_data.get("tasks", [])
-    pending_tasks = [t for t in all_tasks if t["status"] == "待處理"]
-    doing_tasks = [t for t in all_tasks if t["status"] == "執行中"]
-    online_nas = db_data.get("online_nas", [])
-
+    pending = [t for t in all_tasks if t["status"] == "待處理"]
+    doing = [t for t in all_tasks if t["status"] == "執行中"]
+    
     col1, col2, col3 = st.columns(3)
-    col1.metric("🟢 目前上線護佐", f"{len(online_nas)} 人")
-    col2.metric("🟡 執行中任務", f"{len(doing_tasks)} 件")
-    col3.metric("🔴 待處理任務", f"{len(pending_tasks)} 件")
+    col1.metric("🟢 線上護佐", f"{len(db_data.get('online_nas', []))}人")
+    col2.metric("🟡 執行中", f"{len(doing)}件")
+    col3.metric("🔴 待處理", f"{len(pending)}件")
     
     st.divider()
+    st.subheader("🏃 執行中動態")
+    for t in doing:
+        st.warning(f"🧑‍⚕️ **{t['assigned_to']}** 於 **{t['location']}**：{t['items']} (剩餘約 {t['est_time']})")
     
-    st.subheader("🏃‍♂️ 護佐執行中動態")
-    if not doing_tasks:
-        st.write("目前大家都在待命，沒有執行中的任務。")
-    else:
-        for t in doing_tasks:
-            st.warning(f"🧑‍⚕️ **【{t['assigned_to']}】** 正在 **{t['location']}** 執行：{t['items']}  ⏳ 預估時間：{t['est_time']} (任務發出於 {t['time_created']})")
-
     st.divider()
+    st.subheader("📋 待處理清單")
+    pending.sort(key=lambda x: (not x["priority"], x["time_created"]))
+    for t in pending:
+        if t["priority"]:
+            st.error(f"🚨 [急件] {t['location']} ➔ {t['items']} ({t['time_created']})")
+        else:
+            st.info(f"📍 {t['location']} ➔ {t['items']} ({t['time_created']})")
 
-    st.subheader("📋 等待救援清單 (待處理)")
-    pending_tasks.sort(key=lambda x: (not x["priority"], x["time_created"])) 
-    if not pending_tasks:
-        st.success("目前沒有積壓的任務，太棒了！")
+# ==========================================
+# 畫面四：歷史紀錄 (包含已取消)
+# ==========================================
+elif role == "📊 歷史紀錄":
+    st.title("📊 任務紀錄")
+    df = pd.DataFrame(db_data.get("tasks", []))
+    if not df.empty:
+        st.dataframe(df[["time_created", "status", "location", "items", "assigned_to", "time_completed"]], use_container_width=True)
     else:
-        for t in pending_tasks:
-            if t["priority"]:
-                st.error(f"🚨 **[急件優先]** {t['location']} ➔ 需要：{t['items']} (等待中，發出時間：{t['time_created']})")
-            else:
-                st.info(f"📍 {t['location']} ➔ 需要：{t['items']} (等待中，發出時間：{t['time_created']})")
+        st.write("尚無資料")
 
-# ==========================================
-# 畫面四：後台任務紀錄
-# ==========================================
-elif role == "📊 後台任務紀錄":
-    st.title("📊 任務執行紀錄與統計")
-    all_tasks = db_data.get("tasks", [])
-    if not all_tasks:
-        st.write("目前尚無任何任務紀錄。")
-    else:
-        df = pd.DataFrame(all_tasks)
-        df = df[["time_created", "status", "priority", "location", "items", "assigned_to", "est_time", "time_completed", "id"]]
-        st.dataframe(df, use_container_width=True)
-
-# ==========================================
-# 自動刷新邏輯
-# ==========================================
+# --- 自動刷新 ---
 if auto_refresh:
     time.sleep(10)
     st.rerun()
